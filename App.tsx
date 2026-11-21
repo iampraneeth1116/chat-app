@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { ChatListScreen } from './src/ChatListScreen';
 import { LoginScreen } from './src/LoginScreen';
 import { User, clearCredentials, getProfile, setCredentials } from './src/api';
 import { colors } from './src/theme';
@@ -23,6 +24,7 @@ function parseSaved(raw: string | null): SavedCredentials | null {
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [me, setMe] = useState<User | null>(null);
+  const [open, setOpen] = useState<{ id: string; title: string } | null>(null);
 
   // Verifies the credentials against the server before accepting them.
   const login = useCallback(async (username: string, password: string) => {
@@ -39,6 +41,7 @@ export default function App() {
 
   const logout = useCallback(async () => {
     clearCredentials();
+    setOpen(null);
     setMe(null);
     await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
   }, []);
@@ -74,21 +77,23 @@ export default function App() {
     );
   } else if (!me) {
     screen = <LoginScreen onLogin={login} />;
-  } else {
-    // Temporary home screen; replaced by the chat list in the next commit.
+  } else if (open) {
+    // Temporary chat screen; replaced by the real conversation view in a later commit.
     screen = (
       <SafeAreaView style={styles.center}>
-        <Text style={styles.hello}>Logged in as {me.name}</Text>
-        <Pressable style={styles.button} onPress={logout}>
-          <Text style={styles.buttonText}>Logout</Text>
+        <Text style={styles.hello}>{open.title}</Text>
+        <Pressable style={styles.button} onPress={() => setOpen(null)}>
+          <Text style={styles.buttonText}>Back</Text>
         </Pressable>
       </SafeAreaView>
     );
+  } else {
+    screen = <ChatListScreen me={me} onOpen={(c, title) => setOpen({ id: c.id, title })} onLogout={logout} />;
   }
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      <StatusBar style={me && !open ? 'light' : 'dark'} />
       {screen}
     </SafeAreaProvider>
   );
