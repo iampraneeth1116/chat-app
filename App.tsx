@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ChatListScreen } from './src/ChatListScreen';
+import { ChatScreen } from './src/ChatScreen';
 import { LoginScreen } from './src/LoginScreen';
 import { User, clearCredentials, getProfile, setCredentials } from './src/api';
 import { colors } from './src/theme';
@@ -78,14 +79,14 @@ export default function App() {
   } else if (!me) {
     screen = <LoginScreen onLogin={login} />;
   } else if (open) {
-    // Temporary chat screen; replaced by the real conversation view in a later commit.
     screen = (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.hello}>{open.title}</Text>
-        <Pressable style={styles.button} onPress={() => setOpen(null)}>
-          <Text style={styles.buttonText}>Back</Text>
-        </Pressable>
-      </SafeAreaView>
+      <ChatScreen
+        key={open.id}
+        conversationId={open.id}
+        title={open.title}
+        meId={me.id}
+        onBack={() => setOpen(null)}
+      />
     );
   } else {
     screen = <ChatListScreen me={me} onOpen={(c, title) => setOpen({ id: c.id, title })} onLogout={logout} />;
@@ -93,7 +94,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={me && !open ? 'light' : 'dark'} />
+      <StatusBar style={me ? 'light' : 'dark'} />
       {screen}
     </SafeAreaProvider>
   );
@@ -101,7 +102,4 @@ export default function App() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  hello: { fontSize: 18, color: colors.text, marginBottom: 16 },
-  button: { backgroundColor: colors.header, borderRadius: 24, paddingVertical: 10, paddingHorizontal: 24 },
-  buttonText: { color: '#fff', fontWeight: '600' },
 });
