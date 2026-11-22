@@ -8,7 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://10.7.30.34:3000"
+        "EXPO_PUBLIC_API_URL": "https://chat-app-1-r272.onrender.com"
       }
     },
     "preview": {
@@ -17,13 +17,16 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://10.7.30.34:3000"
+        "EXPO_PUBLIC_API_URL": "https://chat-app-1-r272.onrender.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://chat-app-1-r272.onrender.com"
       }
     }
   },

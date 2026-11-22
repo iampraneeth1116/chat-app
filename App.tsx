@@ -8,8 +8,7 @@ import { ChatListScreen } from './src/ChatListScreen';
 import { ChatScreen } from './src/ChatScreen';
 import { LoginScreen } from './src/LoginScreen';
 import { SignupScreen } from './src/SignupScreen';
-import { SERVER_URL_STORAGE_KEY } from './src/AuthLayout';
-import { User, clearCredentials, getProfile, loginUser, setBaseUrl, setCredentials, signupUser } from './src/api';
+import { User, clearCredentials, getProfile, loginUser, setCredentials, signupUser } from './src/api';
 import { colors } from './src/theme';
 
 const STORAGE_KEY = 'credentials';
@@ -62,14 +61,11 @@ export default function App() {
     await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
   }, []);
 
-  // Restore any custom server URL and previous session on launch.
+  // Restore the previous session on launch.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const savedUrl = await AsyncStorage.getItem(SERVER_URL_STORAGE_KEY);
-        if (savedUrl) setBaseUrl(savedUrl);
-
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         const saved = parseSaved(raw);
         if (saved) {
