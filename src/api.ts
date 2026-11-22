@@ -1,5 +1,9 @@
-// Override with EXPO_PUBLIC_API_URL in a .env file, e.g. EXPO_PUBLIC_API_URL=http://192.168.1.10:3000
-export const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://10.7.1.89:3000').replace(/\/+$/, '');
+import { Platform } from 'react-native';
+
+// Defaults to the local backend server. Override with EXPO_PUBLIC_API_URL in .env
+// when testing on a physical phone over Wi-Fi (e.g. http://192.168.1.10:3000).
+const DEFAULT_LOCAL_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+export const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_LOCAL_URL).replace(/\/+$/, '');
 
 export type User = { id: string; name: string; bio?: string | null };
 export type Conversation = {
