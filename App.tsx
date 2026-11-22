@@ -1,14 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ChatListScreen } from './src/ChatListScreen';
 import { ChatScreen } from './src/ChatScreen';
 import { LoginScreen } from './src/LoginScreen';
 import { SignupScreen } from './src/SignupScreen';
-import { User, clearCredentials, getProfile, loginUser, setCredentials, signupUser } from './src/api';
+import {
+  User,
+  clearCredentials,
+  getProfile,
+  loginUser,
+  registerPushToken,
+  setCredentials,
+  signupUser,
+  unregisterPushToken,
+} from './src/api';
+import { registerForPushNotificationsAsync, setActiveConversationId } from './src/notifications';
 import { colors } from './src/theme';
 
 const STORAGE_KEY = 'credentials';
@@ -30,6 +41,8 @@ export default function App() {
   const [me, setMe] = useState<User | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [open, setOpen] = useState<{ id: string; title: string } | null>(null);
+  const pushTokenRef = useRef<string | null>(null);
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
 
   const persistSession = useCallback(async (username: string, password: string, profile: User) => {
     setCredentials(username, password);
@@ -54,6 +67,11 @@ export default function App() {
   );
 
   const logout = useCallback(async () => {
+    const token = pushTokenRef.current;
+    pushTokenRef.current = null;
+    if (token) {
+      await unregisterPushToken(token).catch(() => {});
+    }
     clearCredentials();
     setOpen(null);
     setMe(null);
@@ -85,6 +103,38 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Register this device's Expo push token whenever a user is signed in.
+  useEffect(() => {
+    if (!me) return;
+    let cancelled = false;
+    (async () => {
+      const token = await registerForPushNotificationsAsync();
+      if (cancelled || !token) return;
+      pushTokenRef.current = token;
+      await registerPushToken(token, Platform.OS).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me]);
+
+  // Suppress foreground banners for whichever conversation is currently open.
+  useEffect(() => {
+    setActiveConversationId(open?.id ?? null);
+    return () => setActiveConversationId(null);
+  }, [open]);
+
+  // Open the target conversation when the user taps a push notification.
+  useEffect(() => {
+    if (!me || !lastNotificationResponse) return;
+    const data = lastNotificationResponse.notification.request.content.data;
+    if (typeof data?.conversationId === 'string') {
+      const title = typeof data.title === 'string' && data.title ? data.title : 'Chat';
+      setOpen({ id: data.conversationId, title });
+      Notifications.clearLastNotificationResponseAsync().catch(() => {});
+    }
+  }, [me, lastNotificationResponse]);
 
   // On Android, pressing the hardware back button inside a chat returns to the chat list.
   useEffect(() => {

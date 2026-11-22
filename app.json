@@ -39,7 +39,13 @@
         }
       ],
       "expo-status-bar",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#0B4F4A"
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/favicon.png"

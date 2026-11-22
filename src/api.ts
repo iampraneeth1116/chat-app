@@ -128,4 +128,14 @@ export const sendMessage = (conversationId: string, content?: string, fileId?: s
     method: 'POST',
     body: JSON.stringify({ conversation_id: conversationId, content: content || undefined, file_id: fileId }),
   });
+export const registerPushToken = (token: string, platform?: string) =>
+  request<{ ok: boolean }>('/push/register', {
+    method: 'POST',
+    body: JSON.stringify({ token, platform }),
+  });
+export const unregisterPushToken = (token: string) =>
+  request<{ ok: boolean }>('/push/unregister', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
 

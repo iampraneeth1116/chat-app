@@ -1,6 +1,7 @@
 import { prisma } from './db.mjs';
 import { toPublicUser } from './auth.mjs';
 import { fileMetadataSelect, formatFileInfo, handleGetFile, handleUploadFile } from './files.mjs';
+import { notifyConversationParticipants, registerPushToken, unregisterPushToken } from './push.mjs';
 
 const PAGE_SIZE = 30;
 const MAX_BODY_BYTES = 16 * 1024 * 1024; // 16 MB (allows 10 MB base64 payloads in Phase 3)
@@ -243,7 +244,31 @@ export async function handleApiRoute(req, url, me) {
       include: { file: { select: fileMetadataSelect }, statuses: true },
     });
 
-    return { status: 201, data: formatMessage(created) };
+    const formatted = formatMessage(created);
+    notifyConversationParticipants({
+      conversationId,
+      senderName: me.name,
+      recipientIds,
+      message: formatted,
+    }).catch((err) => {
+      console.error('[push] Failed to send notification:', err);
+    });
+
+    return { status: 201, data: formatted };
+  }
+
+  // POST /push/register
+  if (method === 'POST' && path === '/push/register') {
+    const body = await readJsonBody(req);
+    const result = await registerPushToken(me.id, body);
+    return { status: 200, data: result };
+  }
+
+  // POST /push/unregister
+  if (method === 'POST' && path === '/push/unregister') {
+    const body = await readJsonBody(req);
+    const result = await unregisterPushToken(me.id, body);
+    return { status: 200, data: result };
   }
 
   // POST /file
