@@ -1,5 +1,6 @@
 import { prisma } from './db.mjs';
 import { toPublicUser } from './auth.mjs';
+import { formatFileInfo, handleGetFile, handleUploadFile } from './files.mjs';
 
 const PAGE_SIZE = 30;
 const MAX_BODY_BYTES = 16 * 1024 * 1024; // 16 MB (allows 10 MB base64 payloads in Phase 3)
@@ -35,20 +36,6 @@ export function formatConversation(c) {
     createdAt: c.createdAt.toISOString(),
     createdBy: c.createdBy,
     participants_ids: c.participants.map((p) => p.userId),
-  };
-}
-
-export function formatFileInfo(f) {
-  if (!f) return null;
-  return {
-    id: f.id,
-    name: f.name,
-    mimeType: f.mimeType,
-    size: f.size,
-    kind: f.kind,
-    uploadedBy: f.uploadedBy,
-    createdAt: f.createdAt.toISOString(),
-    downloadUrl: `/file/${encodeURIComponent(f.id)}`,
   };
 }
 
@@ -257,6 +244,21 @@ export async function handleApiRoute(req, url, me) {
     });
 
     return { status: 201, data: formatMessage(created) };
+  }
+
+  // POST /file
+  if (method === 'POST' && path === '/file') {
+    const body = await readJsonBody(req);
+    const file = await handleUploadFile(body, me);
+    return { status: 201, data: file };
+  }
+
+  // GET /file/:id
+  if (method === 'GET' && path.startsWith('/file/')) {
+    const id = decodeURIComponent(path.slice('/file/'.length));
+    if (!id || id.includes('/')) throw httpError(400, 'Invalid file id');
+    const file = await handleGetFile(id);
+    return { status: 200, data: file };
   }
 
   return null;
