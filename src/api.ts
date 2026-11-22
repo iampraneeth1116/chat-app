@@ -50,9 +50,11 @@ export function clearCredentials() {
   authHeader = '';
 }
 
-// Long strings (e.g. base64 file data) are cut so logs stay readable. Never log the Authorization header.
-const trim = (_key: string, value: unknown) =>
-  typeof value === 'string' && value.length > 120 ? `${value.slice(0, 120)}…(${value.length} chars)` : value;
+// Sensitive fields and long base64 payloads are redacted/trimmed so dev logs stay safe and readable.
+const trim = (key: string, value: unknown) => {
+  if (key === 'password' && typeof value === 'string') return '***';
+  return typeof value === 'string' && value.length > 120 ? `${value.slice(0, 120)}…(${value.length} chars)` : value;
+};
 const preview = (value: unknown) => (value === undefined ? '' : JSON.stringify(value, trim));
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -72,9 +74,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   let res: Response;
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authHeader) headers.Authorization = authHeader;
     res = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', Authorization: authHeader, ...init.headers },
+      headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
@@ -93,6 +97,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+export const loginUser = (username: string, password: string) =>
+  request<User>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+export const signupUser = (username: string, password: string, bio?: string) =>
+  request<User>('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, bio: bio?.trim() || undefined }),
+  });
 export const getProfile = () => request<User>('/user/profile');
 export const getUsers = () => request<User[]>('/user');
 export const getConversations = () => request<Conversation[]>('/conversation');

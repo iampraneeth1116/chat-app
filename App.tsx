@@ -7,12 +7,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ChatListScreen } from './src/ChatListScreen';
 import { ChatScreen } from './src/ChatScreen';
 import { LoginScreen } from './src/LoginScreen';
-import { User, clearCredentials, getProfile, setCredentials } from './src/api';
+import { SignupScreen } from './src/SignupScreen';
+import { User, clearCredentials, getProfile, loginUser, setCredentials, signupUser } from './src/api';
 import { colors } from './src/theme';
 
 const STORAGE_KEY = 'credentials';
 
 type SavedCredentials = { username: string; password: string };
+type AuthMode = 'login' | 'signup';
 
 function parseSaved(raw: string | null): SavedCredentials | null {
   if (!raw) return null;
@@ -26,25 +28,36 @@ function parseSaved(raw: string | null): SavedCredentials | null {
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [me, setMe] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [open, setOpen] = useState<{ id: string; title: string } | null>(null);
 
-  // Verifies the credentials against the server before accepting them.
-  const login = useCallback(async (username: string, password: string) => {
+  const persistSession = useCallback(async (username: string, password: string, profile: User) => {
     setCredentials(username, password);
-    try {
-      const profile = await getProfile();
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ username, password }));
-      setMe(profile);
-    } catch (e) {
-      clearCredentials();
-      throw e;
-    }
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ username, password }));
+    setMe(profile);
   }, []);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
+      const profile = await loginUser(username, password);
+      await persistSession(username, password, profile);
+    },
+    [persistSession],
+  );
+
+  const signup = useCallback(
+    async (username: string, password: string, bio?: string) => {
+      const profile = await signupUser(username, password, bio);
+      await persistSession(username, password, profile);
+    },
+    [persistSession],
+  );
 
   const logout = useCallback(async () => {
     clearCredentials();
     setOpen(null);
     setMe(null);
+    setAuthMode('login');
     await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
   }, []);
 
@@ -56,11 +69,14 @@ export default function App() {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         const saved = parseSaved(raw);
         if (saved) {
-          await login(saved.username, saved.password);
+          setCredentials(saved.username, saved.password);
+          const profile = await getProfile();
+          if (!cancelled) setMe(profile);
         } else if (raw) {
           await AsyncStorage.removeItem(STORAGE_KEY); // corrupted entry
         }
       } catch {
+        clearCredentials();
         // Server unreachable or credentials rejected: fall through to the login screen.
       }
       if (!cancelled) setBooting(false);
@@ -68,7 +84,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [login]);
+  }, []);
 
   // On Android, pressing the hardware back button inside a chat returns to the chat list.
   useEffect(() => {
@@ -91,7 +107,12 @@ export default function App() {
       </View>
     );
   } else if (!me) {
-    screen = <LoginScreen onLogin={login} />;
+    screen =
+      authMode === 'login' ? (
+        <LoginScreen onLogin={login} onSwitchToSignup={() => setAuthMode('signup')} />
+      ) : (
+        <SignupScreen onSignup={signup} onSwitchToLogin={() => setAuthMode('login')} />
+      );
   } else if (open) {
     screen = (
       <ChatScreen

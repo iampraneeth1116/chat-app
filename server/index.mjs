@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { prisma } from './db.mjs';
-import { authenticateRequest } from './auth.mjs';
-import { handleApiRoute } from './routes.mjs';
+import { authenticateRequest, loginWithCredentials, signupWithCredentials } from './auth.mjs';
+import { handleApiRoute, readJsonBody } from './routes.mjs';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -28,13 +28,29 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  const path = url.pathname.replace(/\/+$/, '') || '/';
 
-  if (req.method === 'GET' && url.pathname === '/health') {
+  if (req.method === 'GET' && path === '/health') {
     sendJson(res, 200, { ok: true });
     return;
   }
 
   try {
+    // Public authentication routes (no Authorization header required)
+    if (req.method === 'POST' && path === '/auth/signup') {
+      const body = await readJsonBody(req);
+      const user = await signupWithCredentials(body);
+      sendJson(res, 201, user);
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/auth/login') {
+      const body = await readJsonBody(req);
+      const user = await loginWithCredentials(body);
+      sendJson(res, 200, user);
+      return;
+    }
+
     const me = await authenticateRequest(req);
     const result = await handleApiRoute(req, url, me);
     if (!result) {
