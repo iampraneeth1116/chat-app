@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +9,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,7 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from './Avatar';
 import { Message, getFile, getMessages, sendMessage, uploadFile } from './api';
-import { colors, formatTime } from './theme';
+import { colors, formatDayLabel, formatTime, isSameDay } from './theme';
 
 const POLL_MS = 3000;
 const MAX_IMAGE_WIDTH = 1280;
@@ -44,7 +46,13 @@ function Ticks({ m, meId }: { m: Message; meId: string }) {
   const others = Object.entries(m.status ?? {}).filter(([id]) => id !== meId);
   const read = others.length > 0 && others.every(([, s]) => s.read);
   const delivered = others.length > 0 && others.every(([, s]) => s.delivered || s.read);
-  return <Text style={[styles.tick, read && { color: colors.tick }]}>{delivered ? '✓✓' : '✓'}</Text>;
+  return (
+    <Ionicons
+      name={delivered ? 'checkmark-done' : 'checkmark'}
+      size={14}
+      color={read ? colors.tickRead : colors.tickSent}
+    />
+  );
 }
 
 // Native <Image> can't be trusted to forward our non-standard Authorization header (it 401s),
@@ -75,7 +83,15 @@ function loadImage(fileId: string): Promise<string> {
   return req;
 }
 
-function ChatImage({ fileId }: { fileId: string }) {
+function ChatImage({
+  fileId,
+  mine,
+  onOpenViewer,
+}: {
+  fileId: string;
+  mine: boolean;
+  onOpenViewer: (uri: string) => void;
+}) {
   const [uri, setUri] = useState(() => imageCache.get(fileId) ?? '');
   const [error, setError] = useState('');
 
@@ -91,24 +107,37 @@ function ChatImage({ fileId }: { fileId: string }) {
     };
   }, [fileId]);
 
-  if (error) return <Text style={styles.msg}>⚠️ Image failed to load: {error}</Text>;
-  if (!uri) {
+  if (error) {
     return (
-      <View style={[styles.msgImage, styles.msgImageLoading]}>
-        <ActivityIndicator color={colors.subtext} />
+      <View style={styles.imgErrorBox}>
+        <Ionicons name="alert-circle-outline" size={16} color={mine ? colors.outgoingText : colors.error} />
+        <Text style={[styles.imgErrorText, mine && styles.outText]}>Image unavailable</Text>
       </View>
     );
   }
-  return <Image source={{ uri }} style={styles.msgImage} resizeMode="cover" />;
+  if (!uri) {
+    return (
+      <View style={[styles.msgImage, styles.msgImageLoading]}>
+        <ActivityIndicator color={mine ? '#FFFFFF' : colors.subtext} />
+      </View>
+    );
+  }
+  return (
+    <Pressable onPress={() => onOpenViewer(uri)}>
+      <Image source={{ uri }} style={styles.msgImage} resizeMode="cover" />
+    </Pressable>
+  );
 }
 
 export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
   // Newest first, rendered in an inverted list.
   const [messages, setMessages] = useState<Message[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [image, setImage] = useState<PendingImage | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const cursor = useRef<string | null>(null); // points at the next older page
   const reachedStart = useRef(false); // true once the oldest message has been loaded
   const loadingOlder = useRef(false);
@@ -136,6 +165,7 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
       // Transient network errors: the next poll will retry.
     } finally {
       polling.current = false;
+      if (mounted.current) setInitialLoading(false);
     }
   }, [conversationId]);
 
@@ -225,12 +255,20 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.back}>←</Text>
+        <Pressable
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          onPress={onBack}
+          hitSlop={10}
+          accessibilityLabel="Back to chats">
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
         </Pressable>
         <Avatar name={title} size={38} />
-        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        <View style={styles.headerTextWrap}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <Text style={styles.subtitle}>Conversation</Text>
+        </View>
       </View>
+
       <KeyboardAvoidingView style={styles.body} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <FlatList
           inverted
@@ -238,88 +276,312 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
           keyExtractor={(m) => m.id}
           onEndReached={loadOlder}
           onEndReachedThreshold={0.3}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => {
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={messages.length === 0 ? styles.emptyList : styles.list}
+          ListEmptyComponent={
+            initialLoading ? (
+              <View style={styles.emptyCenter}>
+                <ActivityIndicator color={colors.brand} />
+              </View>
+            ) : (
+              <View style={styles.emptyCenter}>
+                <View style={styles.emptyCard}>
+                  <Ionicons name="chatbubble-outline" size={22} color={colors.brand} />
+                  <Text style={styles.emptyTitle}>Say hello to {title}</Text>
+                  <Text style={styles.emptySub}>Messages sent here are saved to your workspace.</Text>
+                </View>
+              </View>
+            )
+          }
+          renderItem={({ item, index }) => {
             const mine = item.senderId === meId;
+            const older = messages[index + 1];
+            const newer = messages[index - 1];
+            const showDateHeader = !older || !isSameDay(item.createdAt, older.createdAt);
+            const groupedWithNewer =
+              !!newer && newer.senderId === item.senderId && isSameDay(item.createdAt, newer.createdAt);
             const imageId = item.fileId ?? item.file?.id;
+
             return (
-              <View style={[styles.bubble, mine ? styles.out : styles.in]}>
-                {item.type === 'IMAGE' && (imageId ? <ChatImage fileId={imageId} /> : <Text style={styles.msg}>📷 Photo</Text>)}
-                {item.type === 'FILE' && <Text style={styles.msg}>📎 {item.file?.name ?? 'File'}</Text>}
-                {!!item.content && <Text style={styles.msg}>{item.content}</Text>}
-                <View style={styles.meta}>
-                  <Text style={styles.time}>{formatTime(item.createdAt)}</Text>
-                  {mine && <Ticks m={item} meId={meId} />}
+              <View>
+                {showDateHeader && (
+                  <View style={styles.dateRow}>
+                    <View style={styles.datePill}>
+                      <Text style={styles.dateText}>{formatDayLabel(item.createdAt)}</Text>
+                    </View>
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.bubble,
+                    mine ? styles.out : styles.in,
+                    groupedWithNewer ? styles.bubbleGrouped : styles.bubbleTailGap,
+                  ]}>
+                  {item.type === 'IMAGE' &&
+                    (imageId ? (
+                      <ChatImage fileId={imageId} mine={mine} onOpenViewer={setViewerUri} />
+                    ) : (
+                      <View style={styles.fileRow}>
+                        <Ionicons name="image-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
+                        <Text style={[styles.msg, mine && styles.outText]}>Photo</Text>
+                      </View>
+                    ))}
+                  {item.type === 'FILE' && (
+                    <View style={styles.fileRow}>
+                      <Ionicons name="document-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
+                      <Text style={[styles.msg, mine && styles.outText]}>
+                        {item.file?.name ?? 'Attachment'}
+                      </Text>
+                    </View>
+                  )}
+                  {!!item.content && <Text style={[styles.msg, mine && styles.outText]}>{item.content}</Text>}
+                  <View style={styles.meta}>
+                    <Text style={[styles.time, mine && styles.outTime]}>{formatTime(item.createdAt)}</Text>
+                    {mine && <Ticks m={item} meId={meId} />}
+                  </View>
                 </View>
               </View>
             );
           }}
         />
+
         {(image || preparing) && (
           <View style={styles.preview}>
             {image ? (
               <Image source={{ uri: image.uri }} style={styles.previewImg} />
             ) : (
-              <View style={[styles.previewImg, styles.msgImageLoading]}>
-                <ActivityIndicator color={colors.subtext} />
+              <View style={[styles.previewImg, styles.previewLoading]}>
+                <ActivityIndicator color={colors.brand} />
               </View>
             )}
-            <Text style={styles.previewLabel}>{image ? 'Photo ready to send' : 'Preparing photo…'}</Text>
+            <View style={styles.previewInfo}>
+              <Text style={styles.previewTitle}>{image ? 'Photo ready' : 'Preparing photo…'}</Text>
+              <Text style={styles.previewSub}>{image ? 'Add a caption or send now' : 'Optimizing image size'}</Text>
+            </View>
             {image && !sending && (
-              <Pressable onPress={() => setImage(null)} hitSlop={8}>
-                <Text style={styles.previewRemove}>✕</Text>
+              <Pressable style={styles.previewRemoveBtn} onPress={() => setImage(null)} hitSlop={8}>
+                <Ionicons name="close" size={18} color={colors.subtext} />
               </Pressable>
             )}
           </View>
         )}
-        <View style={styles.inputRow}>
+
+        <View style={styles.composerBar}>
+          <Pressable
+            onPress={pickImage}
+            hitSlop={6}
+            style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+            disabled={preparing || sending}
+            accessibilityLabel="Attach photo">
+            <Ionicons name="image-outline" size={21} color={colors.subtext} />
+          </Pressable>
           <View style={styles.inputBox}>
             <TextInput
               style={styles.input}
-              placeholder={image ? 'Add a caption' : 'Message'}
+              placeholder={image ? 'Add a caption…' : 'Write a message…'}
+              placeholderTextColor={colors.muted}
               value={text}
               onChangeText={setText}
               multiline
             />
-            <Pressable onPress={pickImage} hitSlop={8} style={styles.upload} disabled={preparing || sending}>
-              <Text style={styles.uploadText}>📎</Text>
-            </Pressable>
           </View>
-          <Pressable style={[styles.send, !canSend && styles.sendDisabled]} onPress={send} disabled={!canSend}>
-            {sending ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendText}>➤</Text>}
+          <Pressable
+            style={({ pressed }) => [
+              styles.send,
+              !canSend && styles.sendDisabled,
+              pressed && canSend && styles.sendPressed,
+            ]}
+            onPress={send}
+            disabled={!canSend}
+            accessibilityLabel="Send message">
+            {sending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal visible={!!viewerUri} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
+        <View style={styles.viewerBackdrop}>
+          <SafeAreaView style={styles.viewerSafe}>
+            <View style={styles.viewerTopBar}>
+              <Pressable style={styles.viewerCloseBtn} onPress={() => setViewerUri(null)} hitSlop={12}>
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </Pressable>
+            </View>
+            {viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" />}
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.header },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  back: { color: '#fff', fontSize: 24 },
-  title: { color: '#fff', fontSize: 18, fontWeight: '600', flex: 1 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnPressed: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  headerTextWrap: { flex: 1 },
+  title: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  subtitle: { color: colors.subtext, fontSize: 12, marginTop: 1 },
   body: { flex: 1, backgroundColor: colors.chatBg },
-  list: { padding: 8 },
-  bubble: { maxWidth: '80%', borderRadius: 8, paddingHorizontal: 9, paddingTop: 6, paddingBottom: 4, marginVertical: 2 },
-  out: { alignSelf: 'flex-end', backgroundColor: colors.outgoing },
-  in: { alignSelf: 'flex-start', backgroundColor: colors.incoming },
-  msgImage: { width: 220, height: 220, borderRadius: 6, marginBottom: 4 },
-  msgImageLoading: { backgroundColor: '#00000010', alignItems: 'center', justifyContent: 'center' },
-  msg: { fontSize: 16, color: colors.text },
-  meta: { flexDirection: 'row', alignSelf: 'flex-end', alignItems: 'center', gap: 4 },
-  time: { fontSize: 11, color: colors.subtext },
-  tick: { fontSize: 11, color: colors.subtext },
-  preview: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 8, marginTop: 8, padding: 8, backgroundColor: '#fff', borderRadius: 12 },
-  previewImg: { width: 56, height: 56, borderRadius: 8 },
-  previewLabel: { flex: 1, color: colors.subtext },
-  previewRemove: { fontSize: 18, color: colors.subtext },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, gap: 8 },
-  inputBox: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#fff', borderRadius: 22 },
-  input: { flex: 1, paddingLeft: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 },
-  upload: { paddingHorizontal: 12, paddingVertical: 11 },
-  uploadText: { fontSize: 20 },
-  send: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.header, alignItems: 'center', justifyContent: 'center' },
-  sendDisabled: { opacity: 0.5 },
-  sendText: { color: '#fff', fontSize: 18 },
+  list: { paddingHorizontal: 12, paddingVertical: 10 },
+  emptyList: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  emptyCenter: { alignItems: 'center', justifyContent: 'center' },
+  emptyCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    alignItems: 'center',
+    maxWidth: 280,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: '600', color: colors.text, marginTop: 10 },
+  emptySub: { fontSize: 13, color: colors.subtext, textAlign: 'center', marginTop: 4, lineHeight: 18 },
+  dateRow: { alignItems: 'center', marginVertical: 12 },
+  datePill: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  dateText: { fontSize: 12, fontWeight: '500', color: colors.subtext },
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  bubbleGrouped: { marginVertical: 1.5 },
+  bubbleTailGap: { marginTop: 1.5, marginBottom: 7 },
+  out: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.outgoing,
+    borderBottomRightRadius: 4,
+  },
+  in: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.incoming,
+    borderWidth: 1,
+    borderColor: colors.incomingBorder,
+    borderBottomLeftRadius: 4,
+  },
+  msgImage: { width: 224, height: 224, borderRadius: 10, marginBottom: 6 },
+  msgImageLoading: { backgroundColor: 'rgba(15, 23, 42, 0.08)', alignItems: 'center', justifyContent: 'center' },
+  imgErrorBox: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  imgErrorText: { fontSize: 14, color: colors.error },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  msg: { fontSize: 15, lineHeight: 21, color: colors.text },
+  outText: { color: colors.outgoingText },
+  meta: { flexDirection: 'row', alignSelf: 'flex-end', alignItems: 'center', gap: 4, marginTop: 3 },
+  time: { fontSize: 11, color: colors.muted },
+  outTime: { color: colors.outgoingSubtext },
+  preview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    padding: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+  },
+  previewImg: { width: 48, height: 48, borderRadius: 8 },
+  previewLoading: { backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  previewInfo: { flex: 1 },
+  previewTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
+  previewSub: { fontSize: 12, color: colors.subtext, marginTop: 1 },
+  previewRemoveBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  composerBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  attachBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachBtnPressed: { backgroundColor: colors.border },
+  inputBox: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 38,
+    justifyContent: 'center',
+  },
+  input: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: colors.text,
+    maxHeight: 110,
+  },
+  send: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendPressed: { backgroundColor: colors.accentPressed },
+  sendDisabled: { backgroundColor: colors.muted, opacity: 0.55 },
+  viewerBackdrop: { flex: 1, backgroundColor: '#0B0F14' },
+  viewerSafe: { flex: 1 },
+  viewerTopBar: { alignItems: 'flex-end', paddingHorizontal: 16, paddingVertical: 10 },
+  viewerCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerImage: { flex: 1, width: '100%' },
 });

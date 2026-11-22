@@ -1,7 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ChatListScreen } from './src/ChatListScreen';
 import { ChatScreen } from './src/ChatScreen';
@@ -69,11 +70,24 @@ export default function App() {
     };
   }, [login]);
 
+  // On Android, pressing the hardware back button inside a chat returns to the chat list.
+  useEffect(() => {
+    if (!open) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setOpen(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [open]);
+
   let screen;
   if (booting) {
     screen = (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.header} />
+        <View style={styles.bootLogo}>
+          <Ionicons name="chatbubble-ellipses" size={26} color="#FFFFFF" />
+        </View>
+        <ActivityIndicator size="small" color={colors.brand} />
       </View>
     );
   } else if (!me) {
@@ -94,12 +108,20 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={me ? 'light' : 'dark'} />
+      <StatusBar style="dark" />
       {screen}
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg, gap: 16 },
+  bootLogo: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
