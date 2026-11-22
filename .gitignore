@@ -41,6 +41,9 @@ yarn-error.*
 /ios
 /android
 
+# local server uploads
+server/data/
+
 # editor / agent local settings
 .claude/
 settings.local.json
