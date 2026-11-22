@@ -1,9 +1,20 @@
 import { Platform } from 'react-native';
 
-// Defaults to the local backend server. Override with EXPO_PUBLIC_API_URL in .env
-// when testing on a physical phone over Wi-Fi (e.g. http://192.168.1.10:3000).
+// Defaults to EXPO_PUBLIC_API_URL (or the local emulator/localhost address),
+// and can be overridden at runtime inside the app via setBaseUrl().
 const DEFAULT_LOCAL_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
-export const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_LOCAL_URL).replace(/\/+$/, '');
+export const DEFAULT_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_LOCAL_URL).replace(/\/+$/, '');
+
+let currentBaseUrl = DEFAULT_BASE_URL;
+
+export function getBaseUrl() {
+  return currentBaseUrl;
+}
+
+export function setBaseUrl(url: string) {
+  const cleaned = url.trim().replace(/\/+$/, '');
+  currentBaseUrl = cleaned || DEFAULT_BASE_URL;
+}
 
 export type User = { id: string; name: string; bio?: string | null };
 export type Conversation = {
@@ -76,14 +87,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authHeader) headers.Authorization = authHeader;
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetch(`${currentBaseUrl}${path}`, {
       ...init,
       headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     if (__DEV__) console.log(`[api] ✗ ${method} ${path} network error after ${Date.now() - started}ms:`, message);
-    throw new Error(`Cannot reach the server at ${BASE_URL}. ${message}`);
+    throw new Error(`Cannot reach the server at ${currentBaseUrl}. ${message}`);
   }
 
   const body = await res.json().catch(() => null);

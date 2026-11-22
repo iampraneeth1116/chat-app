@@ -2,14 +2,17 @@
   "expo": {
     "name": "Chat App",
     "slug": "chat-app",
+    "owner": "iampraneeth1116",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.praneeth.chatapp"
     },
     "android": {
+      "package": "com.praneeth.chatapp",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -26,11 +29,25 @@
           "cameraPermission": false,
           "microphonePermission": false
         }
-      ]
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-status-bar",
+      "expo-font"
     ],
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f42fdac9-eb52-4bb7-aeb0-18f707e7dc93"
+      }
     }
   }
 }
-
