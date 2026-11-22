@@ -1,6 +1,6 @@
 import { prisma } from './db.mjs';
 import { toPublicUser } from './auth.mjs';
-import { formatFileInfo, handleGetFile, handleUploadFile } from './files.mjs';
+import { fileMetadataSelect, formatFileInfo, handleGetFile, handleUploadFile } from './files.mjs';
 
 const PAGE_SIZE = 30;
 const MAX_BODY_BYTES = 16 * 1024 * 1024; // 16 MB (allows 10 MB base64 payloads in Phase 3)
@@ -170,7 +170,7 @@ export async function handleApiRoute(req, url, me) {
 
     const rows = await prisma.message.findMany({
       where: { conversationId, ...cursorFilter },
-      include: { file: true, statuses: true },
+      include: { file: { select: fileMetadataSelect }, statuses: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: PAGE_SIZE + 1,
     });
@@ -218,7 +218,7 @@ export async function handleApiRoute(req, url, me) {
 
     let messageType = 'TEXT';
     if (fileId) {
-      const file = await prisma.file.findUnique({ where: { id: fileId } });
+      const file = await prisma.file.findUnique({ where: { id: fileId }, select: { kind: true } });
       if (!file) throw httpError(404, 'Attached file not found');
       messageType = file.kind === 'IMAGE' ? 'IMAGE' : 'FILE';
     }
@@ -240,7 +240,7 @@ export async function handleApiRoute(req, url, me) {
           create: recipientIds.map((userId) => ({ userId, delivered: false, read: false })),
         },
       },
-      include: { file: true, statuses: true },
+      include: { file: { select: fileMetadataSelect }, statuses: true },
     });
 
     return { status: 201, data: formatMessage(created) };

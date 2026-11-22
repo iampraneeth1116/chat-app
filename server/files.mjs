@@ -1,12 +1,18 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { prisma } from './db.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
-const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.join(SERVER_DIR, 'data', 'uploads');
+
+export const fileMetadataSelect = {
+  id: true,
+  name: true,
+  mimeType: true,
+  size: true,
+  kind: true,
+  uploadedBy: true,
+  createdAt: true,
+};
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -48,28 +54,21 @@ export async function handleUploadFile(body, me) {
 
   const safeName = path.basename(rawName);
   const kind = mimeType.toLowerCase().startsWith('image/') ? 'IMAGE' : 'FILE';
-  const fileKey = `${randomUUID()}-${safeName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const storagePath = path.join(UPLOADS_DIR, fileKey);
 
-  await mkdir(UPLOADS_DIR, { recursive: true });
-  await writeFile(storagePath, buffer);
+  const record = await prisma.file.create({
+    data: {
+      name: safeName,
+      mimeType,
+      size: buffer.length,
+      kind,
+      storagePath: 'postgres',
+      content: buffer,
+      uploadedBy: me.id,
+    },
+    select: fileMetadataSelect,
+  });
 
-  try {
-    const record = await prisma.file.create({
-      data: {
-        name: safeName,
-        mimeType,
-        size: buffer.length,
-        kind,
-        storagePath,
-        uploadedBy: me.id,
-      },
-    });
-    return formatFileInfo(record);
-  } catch (err) {
-    await unlink(storagePath).catch(() => {});
-    throw err;
-  }
+  return formatFileInfo(record);
 }
 
 export async function handleGetFile(id) {
@@ -77,10 +76,14 @@ export async function handleGetFile(id) {
   if (!record) throw httpError(404, 'File not found');
 
   let buffer;
-  try {
-    buffer = await readFile(record.storagePath);
-  } catch {
-    throw httpError(404, 'File content missing on local disk');
+  if (record.content) {
+    buffer = Buffer.from(record.content);
+  } else {
+    try {
+      buffer = await readFile(record.storagePath);
+    } catch {
+      throw httpError(404, 'File content unavailable');
+    }
   }
 
   return {

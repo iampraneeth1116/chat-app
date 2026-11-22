@@ -68,6 +68,7 @@ model File {
   size        Int
   kind        FileKind
   storagePath String
+  content     Bytes?
   uploadedBy  String
   createdAt   DateTime @default(now())
 
