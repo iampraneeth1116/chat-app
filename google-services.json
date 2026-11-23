@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1075275641039",
+    "project_id": "chatapp-dffa9",
+    "storage_bucket": "chatapp-dffa9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1075275641039:android:d7f545e3393545944787ba",
+        "android_client_info": {
+          "package_name": "com.praneeth.chatapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBxH04k26v2Huppj4renbb0Ku_TssOIdC0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
