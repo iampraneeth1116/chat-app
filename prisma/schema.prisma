@@ -34,6 +34,7 @@ model User {
   participations       ConversationParticipant[]
   messages             Message[]
   messageStatuses      MessageStatus[]
+  deletedMessages      DeletedMessage[]
   files                File[]
   pushTokens           PushToken[]
 }
@@ -53,7 +54,9 @@ model Conversation {
 model ConversationParticipant {
   conversationId String
   userId         String
-  joinedAt       DateTime @default(now())
+  joinedAt       DateTime  @default(now())
+  clearedAt      DateTime?
+  hidden         Boolean   @default(false)
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -78,20 +81,34 @@ model File {
 }
 
 model Message {
-  id             String      @id @default(cuid())
-  content        String      @default("")
-  type           MessageType @default(TEXT)
-  fileId         String?
-  createdAt      DateTime    @default(now())
-  senderId       String
-  conversationId String
+  id                 String      @id @default(cuid())
+  content            String      @default("")
+  type               MessageType @default(TEXT)
+  fileId             String?
+  deletedForEveryone Boolean     @default(false)
+  createdAt          DateTime    @default(now())
+  senderId           String
+  conversationId     String
 
-  sender       User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  file         File?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  sender       User             @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  file         File?            @relation(fields: [fileId], references: [id], onDelete: SetNull)
   statuses     MessageStatus[]
+  deletedBy    DeletedMessage[]
 
   @@index([conversationId, createdAt])
+}
+
+model DeletedMessage {
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
 }
 
 model MessageStatus {

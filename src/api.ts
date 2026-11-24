@@ -26,6 +26,7 @@ export type Message = {
   type: 'TEXT' | 'IMAGE' | 'FILE';
   fileId?: string | null;
   file?: FileInfo | null;
+  deletedForEveryone?: boolean;
   createdAt: string;
   senderId: string;
   conversationId: string;
@@ -127,6 +128,14 @@ export const sendMessage = (conversationId: string, content?: string, fileId?: s
   request<Message>('/message', {
     method: 'POST',
     body: JSON.stringify({ conversation_id: conversationId, content: content || undefined, file_id: fileId }),
+  });
+export const deleteMessage = (messageId: string, scope: 'me' | 'everyone') =>
+  request<Message | { ok: boolean; id: string; scope: 'me' }>(`/message/${encodeURIComponent(messageId)}?scope=${scope}`, {
+    method: 'DELETE',
+  });
+export const deleteConversation = (conversationId: string) =>
+  request<{ ok: boolean; id: string }>(`/conversation/${encodeURIComponent(conversationId)}`, {
+    method: 'DELETE',
   });
 export const registerPushToken = (token: string, platform?: string) =>
   request<{ ok: boolean }>('/push/register', {

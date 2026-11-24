@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from './Avatar';
-import { Conversation, Message, User, createConversation, getConversations, getMessages, getUsers } from './api';
+import { Conversation, Message, User, createConversation, deleteConversation, getConversations, getMessages, getUsers } from './api';
 import { colors, formatListTime } from './theme';
 
 const POLL_MS = 5000;
@@ -33,6 +33,9 @@ export function conversationTitle(c: Conversation, meId: string, users: Record<s
 
 function previewText(m: Message | undefined, meId: string) {
   if (!m) return 'No messages yet';
+  if (m.deletedForEveryone) {
+    return m.senderId === meId ? 'You deleted this message' : 'This message was deleted';
+  }
   const prefix = m.senderId === meId ? 'You: ' : '';
   if (m.type === 'IMAGE') return `${prefix}${m.content ? `Photo · ${m.content}` : 'Photo'}`;
   if (m.type === 'FILE') return `${prefix}${m.file?.name ?? 'Attachment'}`;
@@ -40,7 +43,7 @@ function previewText(m: Message | undefined, meId: string) {
 }
 
 function PreviewStatusIcon({ m, meId }: { m: Message; meId: string }) {
-  if (m.senderId !== meId) return null;
+  if (m.senderId !== meId || m.deletedForEveryone) return null;
   const others = Object.entries(m.status ?? {}).filter(([id]) => id !== meId);
   const read = others.length > 0 && others.every(([, s]) => s.read);
   const delivered = others.length > 0 && others.every(([, s]) => s.delivered || s.read);
@@ -113,6 +116,34 @@ export function ChatListScreen({ me, onOpen, onLogout }: Props) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: onLogout },
     ]);
+  };
+
+  const confirmDeleteChat = (c: Conversation, title: string) => {
+    Alert.alert(
+      'Delete chat',
+      `Delete "${title}" for you? Other participants will still keep their messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete for me',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteConversation(c.id);
+              if (!mounted.current) return;
+              setConvos((prev) => prev.filter((item) => item.id !== c.id));
+              setLast((prev) => {
+                const next = { ...prev };
+                delete next[c.id];
+                return next;
+              });
+            } catch (e: unknown) {
+              Alert.alert('Could not delete chat', e instanceof Error ? e.message : 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   // Most recent activity first; chats without messages fall back to their creation time.
@@ -267,7 +298,9 @@ export function ChatListScreen({ me, onOpen, onLogout }: Props) {
           return (
             <Pressable
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              onPress={() => onOpen(item, title)}>
+              onPress={() => onOpen(item, title)}
+              onLongPress={() => confirmDeleteChat(item, title)}
+              delayLongPress={300}>
               <Avatar name={title} size={48} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
@@ -276,10 +309,10 @@ export function ChatListScreen({ me, onOpen, onLogout }: Props) {
                 </View>
                 <View style={styles.previewRow}>
                   {m && <PreviewStatusIcon m={m} meId={me.id} />}
-                  {m?.type === 'IMAGE' && (
+                  {!m?.deletedForEveryone && m?.type === 'IMAGE' && (
                     <Ionicons name="image-outline" size={14} color={colors.subtext} style={styles.previewMediaIcon} />
                   )}
-                  {m?.type === 'FILE' && (
+                  {!m?.deletedForEveryone && m?.type === 'FILE' && (
                     <Ionicons name="document-outline" size={14} color={colors.subtext} style={styles.previewMediaIcon} />
                   )}
                   <Text style={styles.preview} numberOfLines={1}>{previewText(m, me.id)}</Text>

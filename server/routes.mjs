@@ -51,6 +51,7 @@ export function formatMessage(m) {
     type: m.type,
     fileId: m.fileId ?? null,
     file: formatFileInfo(m.file),
+    deletedForEveryone: Boolean(m.deletedForEveryone),
     createdAt: m.createdAt.toISOString(),
     senderId: m.senderId,
     conversationId: m.conversationId,
@@ -63,6 +64,7 @@ async function assertParticipant(conversationId, userId) {
     where: { conversationId_userId: { conversationId, userId } },
   });
   if (!membership) throw httpError(403, 'Not a participant in this conversation');
+  return membership;
 }
 
 export async function handleApiRoute(req, url, me) {
@@ -83,7 +85,7 @@ export async function handleApiRoute(req, url, me) {
   // GET /conversation
   if (method === 'GET' && path === '/conversation') {
     const convos = await prisma.conversation.findMany({
-      where: { participants: { some: { userId: me.id } } },
+      where: { participants: { some: { userId: me.id, hidden: false } } },
       include: { participants: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -127,6 +129,10 @@ export async function handleApiRoute(req, url, me) {
           c.participants.every((p) => participantIds.includes(p.userId)),
       );
       if (existing) {
+        await prisma.conversationParticipant.updateMany({
+          where: { conversationId: existing.id, userId: me.id, hidden: true },
+          data: { hidden: false },
+        });
         return { status: 200, data: formatConversation(existing) };
       }
     }
@@ -150,7 +156,7 @@ export async function handleApiRoute(req, url, me) {
   if (method === 'GET' && path === '/message') {
     const conversationId = url.searchParams.get('conversation_id');
     if (!conversationId) throw httpError(400, 'conversation_id is required');
-    await assertParticipant(conversationId, me.id);
+    const membership = await assertParticipant(conversationId, me.id);
 
     const cursorId = url.searchParams.get('from_message_cursor');
     let cursorFilter = {};
@@ -170,7 +176,12 @@ export async function handleApiRoute(req, url, me) {
     }
 
     const rows = await prisma.message.findMany({
-      where: { conversationId, ...cursorFilter },
+      where: {
+        conversationId,
+        deletedBy: { none: { userId: me.id } },
+        ...(membership.clearedAt ? { createdAt: { gt: membership.clearedAt } } : {}),
+        ...cursorFilter,
+      },
       include: { file: { select: fileMetadataSelect }, statuses: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: PAGE_SIZE + 1,
@@ -244,6 +255,11 @@ export async function handleApiRoute(req, url, me) {
       include: { file: { select: fileMetadataSelect }, statuses: true },
     });
 
+    await prisma.conversationParticipant.updateMany({
+      where: { conversationId, hidden: true },
+      data: { hidden: false },
+    });
+
     const formatted = formatMessage(created);
     notifyConversationParticipants({
       conversationId,
@@ -255,6 +271,57 @@ export async function handleApiRoute(req, url, me) {
     });
 
     return { status: 201, data: formatted };
+  }
+
+  // DELETE /message/:id?scope=me|everyone
+  if (method === 'DELETE' && path.startsWith('/message/')) {
+    const id = decodeURIComponent(path.slice('/message/'.length));
+    if (!id || id.includes('/')) throw httpError(400, 'Invalid message id');
+    const scope = url.searchParams.get('scope') === 'everyone' ? 'everyone' : 'me';
+
+    const message = await prisma.message.findUnique({ where: { id } });
+    if (!message) throw httpError(404, 'Message not found');
+    await assertParticipant(message.conversationId, me.id);
+
+    if (scope === 'everyone') {
+      if (message.senderId !== me.id) {
+        throw httpError(403, 'Only the sender can delete a message for everyone');
+      }
+      const updated = await prisma.message.update({
+        where: { id },
+        data: {
+          content: '',
+          type: 'TEXT',
+          fileId: null,
+          deletedForEveryone: true,
+        },
+        include: { file: { select: fileMetadataSelect }, statuses: true },
+      });
+      if (message.fileId) {
+        await prisma.file.deleteMany({ where: { id: message.fileId } }).catch(() => {});
+      }
+      return { status: 200, data: formatMessage(updated) };
+    }
+
+    await prisma.deletedMessage.upsert({
+      where: { messageId_userId: { messageId: id, userId: me.id } },
+      update: {},
+      create: { messageId: id, userId: me.id },
+    });
+    return { status: 200, data: { ok: true, id, scope: 'me' } };
+  }
+
+  // DELETE /conversation/:id (clears and hides conversation for the current user only)
+  if (method === 'DELETE' && path.startsWith('/conversation/')) {
+    const id = decodeURIComponent(path.slice('/conversation/'.length));
+    if (!id || id.includes('/')) throw httpError(400, 'Invalid conversation id');
+    await assertParticipant(id, me.id);
+
+    await prisma.conversationParticipant.update({
+      where: { conversationId_userId: { conversationId: id, userId: me.id } },
+      data: { hidden: true, clearedAt: new Date() },
+    });
+    return { status: 200, data: { ok: true, id } };
   }
 
   // POST /push/register

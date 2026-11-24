@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from './Avatar';
-import { Message, getFile, getMessages, sendMessage, uploadFile } from './api';
+import { Message, deleteConversation, deleteMessage, getFile, getMessages, sendMessage, uploadFile } from './api';
 import { colors, formatDayLabel, formatTime, isSameDay } from './theme';
 
 const POLL_MS = 3000;
@@ -87,10 +87,12 @@ function ChatImage({
   fileId,
   mine,
   onOpenViewer,
+  onLongPress,
 }: {
   fileId: string;
   mine: boolean;
   onOpenViewer: (uri: string) => void;
+  onLongPress: () => void;
 }) {
   const [uri, setUri] = useState(() => imageCache.get(fileId) ?? '');
   const [error, setError] = useState('');
@@ -123,7 +125,7 @@ function ChatImage({
     );
   }
   return (
-    <Pressable onPress={() => onOpenViewer(uri)}>
+    <Pressable onPress={() => onOpenViewer(uri)} onLongPress={onLongPress} delayLongPress={250}>
       <Image source={{ uri }} style={styles.msgImage} resizeMode="cover" />
     </Pressable>
   );
@@ -138,6 +140,8 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
   const [image, setImage] = useState<PendingImage | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const cursor = useRef<string | null>(null); // points at the next older page
   const reachedStart = useRef(false); // true once the oldest message has been loaded
   const loadingOlder = useRef(false);
@@ -252,6 +256,48 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
 
   const canSend = (!!text.trim() || !!image) && !sending && !preparing;
 
+  const handleDeleteMessage = async (scope: 'me' | 'everyone') => {
+    if (!selectedMessage || deleting) return;
+    const target = selectedMessage;
+    setDeleting(true);
+    try {
+      const result = await deleteMessage(target.id, scope);
+      if (!mounted.current) return;
+      if (scope === 'everyone' && 'id' in result && 'createdAt' in result) {
+        setMessages((prev) => mergeMessages(prev, [result]));
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== target.id));
+      }
+      setSelectedMessage(null);
+    } catch (e: unknown) {
+      Alert.alert('Could not delete', e instanceof Error ? e.message : 'Please try again.');
+    } finally {
+      if (mounted.current) setDeleting(false);
+    }
+  };
+
+  const confirmDeleteChat = () => {
+    Alert.alert(
+      'Delete chat',
+      `Delete "${title}" for you? Other participants will still keep their messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete for me',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteConversation(conversationId);
+              if (mounted.current) onBack();
+            } catch (e: unknown) {
+              Alert.alert('Could not delete chat', e instanceof Error ? e.message : 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
@@ -267,6 +313,13 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
           <Text style={styles.subtitle}>Conversation</Text>
         </View>
+        <Pressable
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          onPress={confirmDeleteChat}
+          hitSlop={8}
+          accessibilityLabel="Delete chat">
+          <Ionicons name="trash-outline" size={20} color={colors.subtext} />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView style={styles.body} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -311,35 +364,57 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
                     </View>
                   </View>
                 )}
-                <View
+                <Pressable
+                  onLongPress={() => setSelectedMessage(item)}
+                  delayLongPress={250}
                   style={[
                     styles.bubble,
                     mine ? styles.out : styles.in,
                     groupedWithNewer ? styles.bubbleGrouped : styles.bubbleTailGap,
                   ]}>
-                  {item.type === 'IMAGE' &&
-                    (imageId ? (
-                      <ChatImage fileId={imageId} mine={mine} onOpenViewer={setViewerUri} />
-                    ) : (
-                      <View style={styles.fileRow}>
-                        <Ionicons name="image-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
-                        <Text style={[styles.msg, mine && styles.outText]}>Photo</Text>
-                      </View>
-                    ))}
-                  {item.type === 'FILE' && (
-                    <View style={styles.fileRow}>
-                      <Ionicons name="document-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
-                      <Text style={[styles.msg, mine && styles.outText]}>
-                        {item.file?.name ?? 'Attachment'}
+                  {item.deletedForEveryone ? (
+                    <View style={styles.deletedRow}>
+                      <Ionicons
+                        name="ban-outline"
+                        size={14}
+                        color={mine ? colors.outgoingSubtext : colors.muted}
+                      />
+                      <Text style={[styles.deletedText, mine && styles.outDeletedText]}>
+                        {mine ? 'You deleted this message' : 'This message was deleted'}
                       </Text>
                     </View>
+                  ) : (
+                    <>
+                      {item.type === 'IMAGE' &&
+                        (imageId ? (
+                          <ChatImage
+                            fileId={imageId}
+                            mine={mine}
+                            onOpenViewer={setViewerUri}
+                            onLongPress={() => setSelectedMessage(item)}
+                          />
+                        ) : (
+                          <View style={styles.fileRow}>
+                            <Ionicons name="image-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
+                            <Text style={[styles.msg, mine && styles.outText]}>Photo</Text>
+                          </View>
+                        ))}
+                      {item.type === 'FILE' && (
+                        <View style={styles.fileRow}>
+                          <Ionicons name="document-outline" size={16} color={mine ? '#FFFFFF' : colors.text} />
+                          <Text style={[styles.msg, mine && styles.outText]}>
+                            {item.file?.name ?? 'Attachment'}
+                          </Text>
+                        </View>
+                      )}
+                      {!!item.content && <Text style={[styles.msg, mine && styles.outText]}>{item.content}</Text>}
+                    </>
                   )}
-                  {!!item.content && <Text style={[styles.msg, mine && styles.outText]}>{item.content}</Text>}
                   <View style={styles.meta}>
                     <Text style={[styles.time, mine && styles.outTime]}>{formatTime(item.createdAt)}</Text>
-                    {mine && <Ticks m={item} meId={meId} />}
+                    {mine && !item.deletedForEveryone && <Ticks m={item} meId={meId} />}
                   </View>
-                </View>
+                </Pressable>
               </View>
             );
           }}
@@ -414,6 +489,58 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
             {viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" />}
           </SafeAreaView>
         </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedMessage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deleting) setSelectedMessage(null);
+        }}>
+        <Pressable
+          style={styles.actionBackdrop}
+          onPress={() => !deleting && setSelectedMessage(null)}>
+          <View style={styles.actionSheet}>
+            <Text style={styles.actionTitle}>Delete message</Text>
+            {selectedMessage && (
+              <Text style={styles.actionPreview} numberOfLines={2}>
+                {selectedMessage.deletedForEveryone
+                  ? 'Deleted message'
+                  : selectedMessage.content || (selectedMessage.type === 'IMAGE' ? 'Photo' : 'Attachment')}
+              </Text>
+            )}
+
+            {selectedMessage?.senderId === meId && !selectedMessage?.deletedForEveryone && (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => handleDeleteMessage('everyone')}
+                disabled={deleting}>
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+                <Text style={styles.actionDestructiveText}>Delete for everyone</Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => handleDeleteMessage('me')}
+              disabled={deleting}>
+              <Ionicons name="eye-off-outline" size={18} color={colors.text} />
+              <Text style={styles.actionNormalText}>Delete for me</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.actionCancelBtn, pressed && styles.actionBtnPressed]}
+              onPress={() => setSelectedMessage(null)}
+              disabled={deleting}>
+              {deleting ? (
+                <ActivityIndicator size="small" color={colors.brand} />
+              ) : (
+                <Text style={styles.actionCancelText}>Cancel</Text>
+              )}
+            </Pressable>
+          </View>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -584,4 +711,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   viewerImage: { flex: 1, width: '100%' },
+  deletedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  deletedText: { fontSize: 14, fontStyle: 'italic', color: colors.subtext },
+  outDeletedText: { color: colors.outgoingSubtext },
+  actionBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+    padding: 16,
+  },
+  actionSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 8,
+  },
+  actionTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
+  actionPreview: { fontSize: 13, color: colors.subtext, marginBottom: 4 },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: colors.bg,
+  },
+  actionBtnPressed: { backgroundColor: colors.surfaceAlt },
+  actionDestructiveText: { fontSize: 15, fontWeight: '600', color: colors.error },
+  actionNormalText: { fontSize: 15, fontWeight: '600', color: colors.text },
+  actionCancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceAlt,
+    marginTop: 2,
+  },
+  actionCancelText: { fontSize: 15, fontWeight: '600', color: colors.subtext },
 });
