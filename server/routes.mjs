@@ -52,6 +52,7 @@ export function formatMessage(m) {
     fileId: m.fileId ?? null,
     file: formatFileInfo(m.file),
     deletedForEveryone: Boolean(m.deletedForEveryone),
+    editedAt: m.editedAt ? m.editedAt.toISOString() : null,
     createdAt: m.createdAt.toISOString(),
     senderId: m.senderId,
     conversationId: m.conversationId,
@@ -271,6 +272,39 @@ export async function handleApiRoute(req, url, me) {
     });
 
     return { status: 201, data: formatted };
+  }
+
+  // PATCH /message/:id
+  if (method === 'PATCH' && path.startsWith('/message/')) {
+    const id = decodeURIComponent(path.slice('/message/'.length));
+    if (!id || id.includes('/')) throw httpError(400, 'Invalid message id');
+
+    const message = await prisma.message.findUnique({ where: { id } });
+    if (!message) throw httpError(404, 'Message not found');
+    await assertParticipant(message.conversationId, me.id);
+
+    if (message.senderId !== me.id) {
+      throw httpError(403, 'Only the sender can edit a message');
+    }
+    if (message.deletedForEveryone) {
+      throw httpError(400, 'Cannot edit a deleted message');
+    }
+
+    const body = await readJsonBody(req);
+    const content = typeof body.content === 'string' ? body.content.trim() : '';
+    if (!content && !message.fileId) {
+      throw httpError(400, 'Message content cannot be empty');
+    }
+
+    const updated = await prisma.message.update({
+      where: { id },
+      data: {
+        content,
+        editedAt: new Date(),
+      },
+      include: { file: { select: fileMetadataSelect }, statuses: true },
+    });
+    return { status: 200, data: formatMessage(updated) };
   }
 
   // DELETE /message/:id?scope=me|everyone

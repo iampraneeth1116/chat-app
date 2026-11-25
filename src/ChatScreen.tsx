@@ -15,11 +15,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from './Avatar';
-import { Message, deleteConversation, deleteMessage, getFile, getMessages, sendMessage, uploadFile } from './api';
+import { Message, deleteConversation, deleteMessage, editMessage, getFile, getMessages, sendMessage, uploadFile } from './api';
 import { colors, formatDayLabel, formatTime, isSameDay } from './theme';
 
 const POLL_MS = 3000;
@@ -141,7 +142,9 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
   const [preparing, setPreparing] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const inputRef = useRef<TextInputInstance>(null);
   const cursor = useRef<string | null>(null); // points at the next older page
   const reachedStart = useRef(false); // true once the oldest message has been loaded
   const loadingOlder = useRef(false);
@@ -234,6 +237,26 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
 
   const send = async () => {
     const content = text.trim();
+    if (editingMessage) {
+      if ((!content && !editingMessage.fileId) || sending) return;
+      const target = editingMessage;
+      setSending(true);
+      setText('');
+      setEditingMessage(null);
+      try {
+        const updated = await editMessage(target.id, content);
+        if (mounted.current) setMessages((prev) => mergeMessages(prev, [updated]));
+      } catch (e: unknown) {
+        if (!mounted.current) return;
+        setText(content);
+        setEditingMessage(target);
+        Alert.alert('Could not edit', e instanceof Error ? e.message : 'Please try again.');
+      } finally {
+        if (mounted.current) setSending(false);
+      }
+      return;
+    }
+
     if ((!content && !image) || sending) return;
     const pending = image;
     setSending(true);
@@ -254,7 +277,22 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
     }
   };
 
-  const canSend = (!!text.trim() || !!image) && !sending && !preparing;
+  const canSend = editingMessage
+    ? (!!text.trim() || !!editingMessage.fileId) && text.trim() !== editingMessage.content && !sending
+    : (!!text.trim() || !!image) && !sending && !preparing;
+
+  const startEditing = (m: Message) => {
+    setSelectedMessage(null);
+    setImage(null);
+    setEditingMessage(m);
+    setText(m.content);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const cancelEditing = () => {
+    setEditingMessage(null);
+    setText('');
+  };
 
   const handleDeleteMessage = async (scope: 'me' | 'everyone') => {
     if (!selectedMessage || deleting) return;
@@ -411,7 +449,11 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
                     </>
                   )}
                   <View style={styles.meta}>
-                    <Text style={[styles.time, mine && styles.outTime]}>{formatTime(item.createdAt)}</Text>
+                    <Text style={[styles.time, mine && styles.outTime]}>
+                      {!item.deletedForEveryone && item.editedAt
+                        ? `${formatTime(item.createdAt)} · Edited ${formatTime(item.editedAt)}`
+                        : formatTime(item.createdAt)}
+                    </Text>
                     {mine && !item.deletedForEveryone && <Ticks m={item} meId={meId} />}
                   </View>
                 </Pressable>
@@ -420,7 +462,26 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
           }}
         />
 
-        {(image || preparing) && (
+        {editingMessage && (
+          <View style={styles.preview}>
+            <View style={styles.editAccentBar} />
+            <View style={styles.previewInfo}>
+              <Text style={styles.previewTitle}>
+                Editing message ({formatTime(editingMessage.createdAt)})
+              </Text>
+              <Text style={styles.previewSub} numberOfLines={1}>
+                {editingMessage.content || 'Photo caption'}
+              </Text>
+            </View>
+            {!sending && (
+              <Pressable style={styles.previewRemoveBtn} onPress={cancelEditing} hitSlop={8}>
+                <Ionicons name="close" size={18} color={colors.subtext} />
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {(image || preparing) && !editingMessage && (
           <View style={styles.preview}>
             {image ? (
               <Image source={{ uri: image.uri }} style={styles.previewImg} />
@@ -442,18 +503,21 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
         )}
 
         <View style={styles.composerBar}>
-          <Pressable
-            onPress={pickImage}
-            hitSlop={6}
-            style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
-            disabled={preparing || sending}
-            accessibilityLabel="Attach photo">
-            <Ionicons name="image-outline" size={21} color={colors.subtext} />
-          </Pressable>
+          {!editingMessage && (
+            <Pressable
+              onPress={pickImage}
+              hitSlop={6}
+              style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+              disabled={preparing || sending}
+              accessibilityLabel="Attach photo">
+              <Ionicons name="image-outline" size={21} color={colors.subtext} />
+            </Pressable>
+          )}
           <View style={styles.inputBox}>
             <TextInput
+              ref={inputRef}
               style={styles.input}
-              placeholder={image ? 'Add a caption…' : 'Write a message…'}
+              placeholder={editingMessage ? 'Edit message…' : image ? 'Add a caption…' : 'Write a message…'}
               placeholderTextColor={colors.muted}
               value={text}
               onChangeText={setText}
@@ -468,11 +532,11 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
             ]}
             onPress={send}
             disabled={!canSend}
-            accessibilityLabel="Send message">
+            accessibilityLabel={editingMessage ? 'Save edit' : 'Send message'}>
             {sending ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
+              <Ionicons name={editingMessage ? 'checkmark' : 'arrow-up'} size={20} color="#FFFFFF" />
             )}
           </Pressable>
         </View>
@@ -502,13 +566,23 @@ export function ChatScreen({ conversationId, title, meId, onBack }: Props) {
           style={styles.actionBackdrop}
           onPress={() => !deleting && setSelectedMessage(null)}>
           <View style={styles.actionSheet}>
-            <Text style={styles.actionTitle}>Delete message</Text>
+            <Text style={styles.actionTitle}>Message options</Text>
             {selectedMessage && (
               <Text style={styles.actionPreview} numberOfLines={2}>
                 {selectedMessage.deletedForEveryone
                   ? 'Deleted message'
                   : selectedMessage.content || (selectedMessage.type === 'IMAGE' ? 'Photo' : 'Attachment')}
               </Text>
+            )}
+
+            {selectedMessage?.senderId === meId && !selectedMessage?.deletedForEveryone && (
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}
+                onPress={() => startEditing(selectedMessage)}
+                disabled={deleting}>
+                <Ionicons name="create-outline" size={18} color={colors.brand} />
+                <Text style={styles.actionNormalText}>Edit message</Text>
+              </Pressable>
             )}
 
             {selectedMessage?.senderId === meId && !selectedMessage?.deletedForEveryone && (
@@ -641,6 +715,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   previewImg: { width: 48, height: 48, borderRadius: 8 },
+  editAccentBar: { width: 3, height: 34, borderRadius: 2, backgroundColor: colors.brand },
   previewLoading: { backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   previewInfo: { flex: 1 },
   previewTitle: { fontSize: 14, fontWeight: '600', color: colors.text },

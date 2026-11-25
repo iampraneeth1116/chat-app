@@ -86,6 +86,7 @@ model Message {
   type               MessageType @default(TEXT)
   fileId             String?
   deletedForEveryone Boolean     @default(false)
+  editedAt           DateTime?
   createdAt          DateTime    @default(now())
   senderId           String
   conversationId     String

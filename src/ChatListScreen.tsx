@@ -37,9 +37,10 @@ function previewText(m: Message | undefined, meId: string) {
     return m.senderId === meId ? 'You deleted this message' : 'This message was deleted';
   }
   const prefix = m.senderId === meId ? 'You: ' : '';
-  if (m.type === 'IMAGE') return `${prefix}${m.content ? `Photo · ${m.content}` : 'Photo'}`;
-  if (m.type === 'FILE') return `${prefix}${m.file?.name ?? 'Attachment'}`;
-  return prefix + m.content;
+  const suffix = m.editedAt ? ' (edited)' : '';
+  if (m.type === 'IMAGE') return `${prefix}${m.content ? `Photo · ${m.content}` : 'Photo'}${suffix}`;
+  if (m.type === 'FILE') return `${prefix}${m.file?.name ?? 'Attachment'}${suffix}`;
+  return prefix + m.content + suffix;
 }
 
 function PreviewStatusIcon({ m, meId }: { m: Message; meId: string }) {

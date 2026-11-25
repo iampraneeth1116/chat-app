@@ -27,6 +27,7 @@ export type Message = {
   fileId?: string | null;
   file?: FileInfo | null;
   deletedForEveryone?: boolean;
+  editedAt?: string | null;
   createdAt: string;
   senderId: string;
   conversationId: string;
@@ -128,6 +129,11 @@ export const sendMessage = (conversationId: string, content?: string, fileId?: s
   request<Message>('/message', {
     method: 'POST',
     body: JSON.stringify({ conversation_id: conversationId, content: content || undefined, file_id: fileId }),
+  });
+export const editMessage = (messageId: string, content: string) =>
+  request<Message>(`/message/${encodeURIComponent(messageId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content }),
   });
 export const deleteMessage = (messageId: string, scope: 'me' | 'everyone') =>
   request<Message | { ok: boolean; id: string; scope: 'me' }>(`/message/${encodeURIComponent(messageId)}?scope=${scope}`, {
